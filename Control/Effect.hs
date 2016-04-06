@@ -64,7 +64,7 @@ translate step (b :>>= k) = translate step b >>= (translate step . k)
 class (IsEff m, Monad m) => Interprets p m | m -> p where
   interpret :: p a -> m a
 
-instance Monad m => Interprets f (Eff f m) where
+instance Applicative m => Interprets f (Eff f m) where
   interpret = E
   {-# INLINE interpret #-}
 
