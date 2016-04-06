@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE RankNTypes #-}
@@ -10,10 +11,8 @@ module Control.Effect
          -- * Core API
          Eff(..), translate, Interprets, interpret, IsEff) where
 
-import Control.Monad
 import Control.Monad.Morph
 import Control.Monad.Trans.Cont (ContT(..))
-import Data.Functor.Sum
 import GHC.Exts (Constraint)
 
 -- | The 'Eff' monad transformer is used to write programs that require access to
@@ -23,8 +22,12 @@ import GHC.Exts (Constraint)
 -- description of programs in a single effect, such as non-determinism (@[]@)or
 -- exceptions (@Either e@). As 'Eff' is a monad transformer, @m@ is the monad
 -- that 'Eff' transforms, which can itself be another instance of 'Eff'.
-newtype Eff f m a =
-  Eff (forall g r. (forall x. Sum f m x -> Cont (g r) x) -> Cont (g r) a)
+data Eff f m a
+  = Val (m a)
+  | E (f a)
+  | forall b. (b -> a) :<$> Eff f m b
+  | forall b. Eff f m (b -> a) :<*> Eff f m b
+  | forall b. Eff f m b :>>= (b -> Eff f m a)
 
 -- | The 'IsEff' type family is used to make sure that a given monad stack
 -- is based around 'Eff'. This is important, as it allows us to reason about
@@ -45,12 +48,11 @@ translate :: (Monad m,Monad (t m),MonadTrans t)
           => (forall x r. f x -> ContT r (t m) x)
           -> Eff f m a
           -> t m a
-translate step (Eff go) =
-  runCont (go (\sum ->
-                 case sum of
-                   InL a -> cont (runContT (step a))
-                   InR a -> cont (\k -> join (lift (fmap k a)))))
-          return
+translate _    (Val ma)   = lift ma
+translate step (E fa)     = runContT (step fa) return
+translate step (f :<$> b) = f <$> translate step b
+translate step (f :<*> b) = translate step f <*> translate step b
+translate step (b :>>= k) = translate step b >>= (translate step . k)
 {-# INLINE translate #-}
 
 -- | 'LiftProgram' defines an @mtl@-style type class for automatically lifting
@@ -63,31 +65,37 @@ class (IsEff m, Monad m) => Interprets p m | m -> p where
   interpret :: p a -> m a
 
 instance Monad m => Interprets f (Eff f m) where
-  interpret p = Eff (\i -> i (InL p))
+  interpret = E
   {-# INLINE interpret #-}
 
 instance (Monad m, Interprets f (Eff h m)) => Interprets f (Eff g (Eff h m)) where
   interpret = lift . interpret
   {-# INLINE interpret #-}
 
-instance Functor (Eff f m) where
-  fmap f (Eff g) = Eff (\a -> fmap f (g a))
+instance Applicative m => Functor (Eff f m) where
+  fmap f (Val ma) = Val (f <$> ma)
+  fmap f (E a) = f :<$> E a
+  fmap f (g :<$> b) = (f . g) <$> b
+  fmap f (g :<*> b) = fmap (f .) g <*> b
+  fmap f (b :>>= k) = b :>>= (fmap f . k)
   {-# INLINE fmap #-}
 
-instance Applicative (Eff f m) where
-  pure a = Eff (\_ -> pure a)
+instance Applicative m => Applicative (Eff f m) where
+  pure a = Val (pure a)
   {-# INLINE pure #-}
-  (<*>) = ap
+  Val mf <*> Val ma = Val (mf <*> ma)
+  f <*> a = f :<*> a
   {-# INLINE (<*>) #-}
 
-instance Monad (Eff f m) where
+instance Applicative m => Monad (Eff f m) where
   return = pure
   {-# INLINE return #-}
-  Eff a >>= f = Eff (\u -> a u >>= \b -> case f b of Eff g -> g u)
+  (f :<$> b) >>= k = b >>= (k . f)
+  a >>= k = a :>>= k
   {-# INLINE (>>=) #-}
 
 instance MonadTrans (Eff f) where
-  lift m = Eff (\l -> l (InR m))
+  lift = Val
   {-# INLINE lift #-}
 
 {- $welcome
@@ -113,7 +121,7 @@ moving operations into a type class, but introduces a more subtle problem along
 the way. Consider the following:
 
 @
-lookupPerson :: PersonName -> 
+lookupPerson :: PersonName ->
 @
 
 . @effect-interpreters@ provides you with a toolkit to
@@ -191,28 +199,3 @@ case, we have to provide a way to lift pure values into the same context as
 'run' - so we simply treat it as success.
 
 -}
-
--- Redefinition of Control.Monad.Trans.Cont because, surprise surprise, it has
--- no inline pragmas.
-
-cont :: ((a -> r) -> r) -> Cont r a
-cont = Cont
-{-# INLINE cont #-}
-
-newtype Cont r a = Cont { runCont :: (a -> r) -> r }
-
-instance Functor (Cont r) where
-  fmap f m = Cont $ \c -> runCont m (c . f)
-  {-# INLINE fmap #-}
-
-instance Applicative (Cont r) where
-  pure x = Cont ($ x)
-  {-# INLINE pure #-}
-  f <*> v = Cont $ \c -> runCont f $ \g -> runCont v (c . g)
-  {-# INLINE (<*>) #-}
-
-instance Monad (Cont r) where
-  return x = Cont ($ x)
-  {-# INLINE return #-}
-  m >>= k = Cont $ \c -> runCont m (\x -> runCont (k x) c)
-  {-# INLINE (>>=) #-}
