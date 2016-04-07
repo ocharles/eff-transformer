@@ -2,8 +2,9 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Control.Effect
        ( -- $welcome
@@ -11,8 +12,10 @@ module Control.Effect
          -- * Core API
          Eff(..), translate, Interprets, interpret, IsEff) where
 
+import Control.Monad ((>=>))
 import Control.Monad.Morph
-import Control.Monad.Trans.Cont (ContT(..))
+import Control.Monad.Trans.Cont
+import Data.Functor.Sum
 import GHC.Exts (Constraint)
 
 -- | The 'Eff' monad transformer is used to write programs that require access to
@@ -23,11 +26,9 @@ import GHC.Exts (Constraint)
 -- exceptions (@Either e@). As 'Eff' is a monad transformer, @m@ is the monad
 -- that 'Eff' transforms, which can itself be another instance of 'Eff'.
 data Eff f m a
-  = Val (m a)
-  | E (f a)
-  | forall b. (b -> a) :<$> Eff f m b
-  | forall b. Eff f m (b -> a) :<*> Eff f m b
-  | forall b. Eff f m b :>>= (b -> Eff f m a)
+  = Val a
+  | forall b. (Eff f m (b -> a)) :<*> (Sum f m b)
+  | forall b. (Sum f m b) :>>= (b -> Eff f m a)
 
 -- | The 'IsEff' type family is used to make sure that a given monad stack
 -- is based around 'Eff'. This is important, as it allows us to reason about
@@ -44,16 +45,14 @@ type family IsEff (m :: * -> *) :: Constraint where
 -- effects in a specific monad transformer. Notice that 'run' eliminates one
 -- layer of 'Eff', returning you with the original @a@ now captured under the
 -- result of the effects described by the @effect@ functor.
-translate :: (Monad m,Monad (t m),MonadTrans t)
+translate :: forall m t f a. (Monad m, Monad (t m), MonadTrans t)
           => (forall x r. f x -> ContT r (t m) x)
-          -> Eff f m a
-          -> t m a
-translate _    (Val ma)   = lift ma
-translate step (E fa)     = runContT (step fa) return
-translate step (f :<$> b) = f <$> translate step b
-translate step (f :<*> b) = translate step f <*> translate step b
-translate step (b :>>= k) = translate step b >>= (translate step . k)
-{-# INLINE translate #-}
+          -> Eff f m a -> t m a
+translate _    (Val a) = return a
+translate step (f :<*> InL a) = translate step f <*> runContT (step a) return
+translate step (f :<*> InR a) = translate step f <*> lift a
+translate step (InL a :>>= k) = runContT (step a) return >>= translate step . k
+translate step (InR a :>>= k) = lift a >>= translate step . k
 
 -- | 'LiftProgram' defines an @mtl@-style type class for automatically lifting
 -- effects into 'Eff' stacks. When exporting libraries that you intend to
@@ -64,38 +63,36 @@ translate step (b :>>= k) = translate step b >>= (translate step . k)
 class (IsEff m, Monad m) => Interprets p m | m -> p where
   interpret :: p a -> m a
 
-instance Applicative m => Interprets f (Eff f m) where
-  interpret = E
+instance Interprets f (Eff f m) where
+  interpret = (return id :<*>) . InL
   {-# INLINE interpret #-}
 
 instance (Monad m, Interprets f (Eff h m)) => Interprets f (Eff g (Eff h m)) where
   interpret = lift . interpret
   {-# INLINE interpret #-}
 
-instance Applicative m => Functor (Eff f m) where
-  fmap f (Val ma) = Val (f <$> ma)
-  fmap f (E a) = f :<$> E a
-  fmap f (g :<$> b) = (f . g) <$> b
-  fmap f (g :<*> b) = fmap (f .) g <*> b
-  fmap f (b :>>= k) = b :>>= (fmap f . k)
+instance Functor (Eff f m) where
+  fmap f (Val a) = Val (f a)
+  fmap f (g :<*> x) = fmap (f .) g :<*> x
+  fmap f (x :>>= k) = x :>>= (fmap f . k)
   {-# INLINE fmap #-}
 
-instance Applicative m => Applicative (Eff f m) where
-  pure a = Val (pure a)
+instance Applicative (Eff f m) where
+  pure = Val
   {-# INLINE pure #-}
-  Val mf <*> Val ma = Val (mf <*> ma)
-  f <*> a = f :<*> a
+  Val f <*> a = fmap f a
+  (f :<*> x) <*> a = (flip <$> f <*> a) :<*> x
+  (x :>>= k) <*> a = x :>>= ((<*> a) . k)
   {-# INLINE (<*>) #-}
 
-instance Applicative m => Monad (Eff f m) where
-  return = pure
-  {-# INLINE return #-}
-  (f :<$> b) >>= k = b >>= (k . f)
-  a >>= k = a :>>= k
+instance Monad (Eff f m) where
+  Val a >>= k = k a
+  (f :<*> x) >>= k = x :>>= \b -> fmap ($ b) f >>= k
+  (x :>>= k') >>= k = x :>>= (k' >=> k)
   {-# INLINE (>>=) #-}
 
 instance MonadTrans (Eff f) where
-  lift = Val
+  lift = (return id :<*>) . InR
   {-# INLINE lift #-}
 
 {- $welcome
