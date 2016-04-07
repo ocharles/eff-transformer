@@ -10,7 +10,7 @@ module Control.Effect
        ( -- $welcome
 
          -- * Core API
-         Eff(..), translate, Interprets, interpret, IsEff) where
+         Eff(..), translate, run, Interprets, interpret, IsEff) where
 
 import Control.Monad ((>=>))
 import Control.Monad.Morph
