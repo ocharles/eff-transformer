@@ -3,10 +3,10 @@
 
 module Control.Effect.Nondeterminism where
 
+import Control.Effect
 import Control.Monad (join)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Cont (shiftT)
-import Control.Effect
+import Control.Monad.Trans.Cont (runContT, shiftT)
 import qualified Pipes as P
 import qualified Pipes.Prelude as P
 
@@ -29,7 +29,7 @@ choose = liftNondeterminism
 
 runNondeterminism :: Monad m => Eff [] m a -> m [a]
 runNondeterminism eff = P.toListM (P.enumerate (translate makeChoice eff))
-  where makeChoice choices =
+  where makeChoice choices = flip runContT return $
           shiftT (\k ->
                     lift (P.Select (P.for (P.each choices)
                                           (P.enumerate . k))))

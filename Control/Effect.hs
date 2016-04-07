@@ -14,7 +14,6 @@ module Control.Effect
 
 import Control.Monad ((>=>))
 import Control.Monad.Morph
-import Control.Monad.Trans.Cont
 import Data.Functor.Sum
 import GHC.Exts (Constraint)
 
@@ -46,13 +45,21 @@ type family IsEff (m :: * -> *) :: Constraint where
 -- layer of 'Eff', returning you with the original @a@ now captured under the
 -- result of the effects described by the @effect@ functor.
 translate :: forall m t f a. (Monad m, Monad (t m), MonadTrans t)
-          => (forall x r. f x -> ContT r (t m) x)
+          => (forall x. f x -> t m x)
           -> Eff f m a -> t m a
-translate _    (Val a) = return a
-translate step (f :<*> InL a) = translate step f <*> runContT (step a) return
-translate step (f :<*> InR a) = translate step f <*> lift a
-translate step (InL a :>>= k) = runContT (step a) return >>= translate step . k
-translate step (InR a :>>= k) = lift a >>= translate step . k
+translate step = run step'
+  where
+    step' :: Sum f m x -> t m x
+    step' (InL x) = step x
+    step' (InR x) = lift x
+
+run :: Monad t
+    => (forall x. Sum f m x -> t x)
+    -> Eff f m a -> t a
+run _    (Val a)    = return a
+run step (f :<*> a) = run step f <*> step a
+run step (a :>>= k) = step a >>= run step . k
+{-# INLINE translate #-}
 
 -- | 'LiftProgram' defines an @mtl@-style type class for automatically lifting
 -- effects into 'Eff' stacks. When exporting libraries that you intend to

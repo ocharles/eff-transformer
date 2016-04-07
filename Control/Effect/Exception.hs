@@ -31,9 +31,9 @@ try = runExceptT . effToExceptT
 {-# INLINE try #-}
 
 effToExceptT :: Monad m => Eff (Either e) m a -> ExceptT e m a
-effToExceptT = translate (lift . ExceptT . return)
+effToExceptT = translate (ExceptT . return)
 {-# INLINE effToExceptT #-}
 
 exceptTToEff :: (Monad m, EffException e m) => ExceptT e m a -> m a
 exceptTToEff = runExceptT >=> liftEither
-{-# INLINE exceptTToEff#-}
+{-# INLINE exceptTToEff #-}
