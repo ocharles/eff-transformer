@@ -44,9 +44,9 @@ mapEnvironment f m = ask >>= runInEnvironment m . f
 {-# INLINE mapEnvironment #-}
 
 effToReaderT :: Monad m => Eff (Reader e) m a -> ReaderT e m a
-effToReaderT = translate (lift . hoist generalize)
+effToReaderT = translate (hoist generalize)
 {-# INLINE effToReaderT #-}
 
 readerTToEff :: (Monad m, EffEnvironment e m) => ReaderT e m a -> m a
 readerTToEff m = ask >>= runReaderT m
-{-# INLINE readerTToEff#-}
+{-# INLINE readerTToEff #-}

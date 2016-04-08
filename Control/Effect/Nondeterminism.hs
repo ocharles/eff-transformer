@@ -3,10 +3,9 @@
 
 module Control.Effect.Nondeterminism where
 
+import Control.Effect
 import Control.Monad (join)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Cont (shiftT)
-import Control.Effect
 import qualified Pipes as P
 import qualified Pipes.Prelude as P
 
@@ -28,11 +27,8 @@ choose = liftNondeterminism
 {-# INLINE choose #-}
 
 runNondeterminism :: Monad m => Eff [] m a -> m [a]
-runNondeterminism eff = P.toListM (P.enumerate (translate makeChoice eff))
-  where makeChoice choices =
-          shiftT (\k ->
-                    lift (P.Select (P.for (P.each choices)
-                                          (P.enumerate . k))))
+runNondeterminism eff = P.toListM
+  (P.enumerate (translate (P.Select . P.each) eff))
 {-# INLINE runNondeterminism #-}
 
 -- TODO Non-conflicting names?

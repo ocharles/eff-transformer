@@ -10,7 +10,7 @@ import qualified Control.Monad.Trans.State.Strict as State
 runState :: Monad m
          => Eff (State s) m a -> s -> m (a,s)
 runState =
-  runStateT . translate (lift . hoist generalize)
+  runStateT . translate (hoist generalize)
 {-# INLINE runState #-}
 
 evalState :: Monad m => Eff (State s) m a -> s -> m a

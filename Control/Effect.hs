@@ -1,20 +1,45 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Control.Effect
        ( -- $welcome
 
          -- * Core API
-         Eff(..), translate, Interprets, interpret, IsEff) where
+         Eff(..), Ap(..), translate, run, Interprets, interpret, IsEff) where
 
-import Control.Monad
 import Control.Monad.Morph
-import Control.Monad.Trans.Cont (ContT(..))
 import Data.Functor.Sum
 import GHC.Exts (Constraint)
+
+-- | The `Ap` Applicative is the Free applicative applied with `Sum`.
+-- The `Freer` monad is implemneted as the `Free` monad
+-- applied with `Lan Identity`.
+-- You can think of `Lan Identity` as a free functor.
+-- The free applicative trivially yields a free functor.
+-- Thus, applying this free applicative to `Free` should yield
+-- something similar to `Freer`.
+-- This is the approach in this module.
+-- By applying a free functor / applicative to `Free`,
+-- we get a `Freer` monad that supports interpretting applicative effects.
+-- By applying `Sum` to this freer monad, we get a freer monad transformer.
+data Ap f m a
+  = Pure a
+  | forall b. Ap f m (b -> a) :<*> Sum f m b
+instance Functor (Ap f m) where
+  fmap f (Pure a) = Pure (f a)
+  fmap f (xs :<*> x) = fmap (f .) xs :<*> x
+  {-# INLINE fmap #-}
+instance Applicative (Ap f m) where
+  pure = Pure
+  {-# INLINE pure #-}
+  Pure f <*> y = fmap f y
+  (xs :<*> x) <*> y = (fmap flip xs <*> y) :<*> x
+  {-# INLINE (<*>) #-}
 
 -- | The 'Eff' monad transformer is used to write programs that require access to
 -- specific effects. In this library, effects are combined by stacking multiple
@@ -23,8 +48,24 @@ import GHC.Exts (Constraint)
 -- description of programs in a single effect, such as non-determinism (@[]@)or
 -- exceptions (@Either e@). As 'Eff' is a monad transformer, @m@ is the monad
 -- that 'Eff' transforms, which can itself be another instance of 'Eff'.
-newtype Eff f m a =
-  Eff (forall g r. (forall x. Sum f m x -> Cont (g r) x) -> Cont (g r) a)
+data Eff f m a
+  = Val a
+  | Eff (Ap f m (Eff f m a))
+instance Functor (Eff f m) where
+  fmap f (Val a) = Val (f a)
+  fmap f (Eff apA) = Eff $ fmap (fmap f) apA
+  {-# INLINE fmap #-}
+instance Applicative (Eff f m) where
+  pure = Val
+  {-# INLINE pure #-}
+  Val f <*> a = fmap f a
+  Eff f <*> Eff a = Eff (fmap (<*>) f <*> a)
+  Eff f <*> Val a = Eff $ fmap (fmap ($ a)) f
+  {-# INLINE (<*>) #-}
+instance Monad (Eff f m) where
+  Val a >>= k = k a
+  Eff m >>= f = Eff ((>>= f) <$> m)
+  {-# INLINE (>>=) #-}
 
 -- | The 'IsEff' type family is used to make sure that a given monad stack
 -- is based around 'Eff'. This is important, as it allows us to reason about
@@ -41,17 +82,27 @@ type family IsEff (m :: * -> *) :: Constraint where
 -- effects in a specific monad transformer. Notice that 'run' eliminates one
 -- layer of 'Eff', returning you with the original @a@ now captured under the
 -- result of the effects described by the @effect@ functor.
-translate :: (Monad m,Monad (t m),MonadTrans t)
-          => (forall x r. f x -> ContT r (t m) x)
-          -> Eff f m a
-          -> t m a
-translate step (Eff go) =
-  runCont (go (\sum ->
-                 case sum of
-                   InL a -> cont (runContT (step a))
-                   InR a -> cont (\k -> join (lift (fmap k a)))))
-          return
+translate :: forall m t f a. (Monad m, Monad (t m), MonadTrans t)
+          => (forall x. f x -> t m x)
+          -> Eff f m a -> t m a
+translate step = run step'
+  where
+    step' :: Sum f m x -> t m x
+    step' (InL x) = step x
+    step' (InR x) = lift x
 {-# INLINE translate #-}
+
+runAp :: Applicative g => (forall x. Sum f m x -> g x) -> Ap f m a -> g a
+runAp _ (Pure x) = pure x
+runAp u (x :<*> f) = flip id <$> u f <*> runAp u x
+{-# INLINE runAp #-}
+
+run :: Monad t
+    => (forall x. Sum f m x -> t x)
+    -> Eff f m a -> t a
+run _    (Val a)   = return a
+run step (Eff apA) = runAp step apA >>= run step
+{-# INLINE run #-}
 
 -- | 'LiftProgram' defines an @mtl@-style type class for automatically lifting
 -- effects into 'Eff' stacks. When exporting libraries that you intend to
@@ -62,41 +113,25 @@ translate step (Eff go) =
 class (IsEff m, Monad m) => Interprets p m | m -> p where
   interpret :: p a -> m a
 
-instance Monad m => Interprets f (Eff f m) where
-  interpret p = Eff (\i -> i (InL p))
+instance Interprets f (Eff f m) where
+  interpret = Eff . (pure Val :<*>) . InL
   {-# INLINE interpret #-}
 
 instance (Monad m, Interprets f (Eff h m)) => Interprets f (Eff g (Eff h m)) where
   interpret = lift . interpret
   {-# INLINE interpret #-}
 
-instance Functor (Eff f m) where
-  fmap f (Eff g) = Eff (\a -> fmap f (g a))
-  {-# INLINE fmap #-}
-
-instance Applicative (Eff f m) where
-  pure a = Eff (\_ -> pure a)
-  {-# INLINE pure #-}
-  (<*>) = ap
-  {-# INLINE (<*>) #-}
-
-instance Monad (Eff f m) where
-  return = pure
-  {-# INLINE return #-}
-  Eff a >>= f = Eff (\u -> a u >>= \b -> case f b of Eff g -> g u)
-  {-# INLINE (>>=) #-}
-
 instance MonadTrans (Eff f) where
-  lift m = Eff (\l -> l (InR m))
+  lift = Eff . (pure Val :<*>) . InR
   {-# INLINE lift #-}
 
 {- $welcome
 
 Welcome to @effect-interpreters@, a composable approach to managing effects in
 Haskell. @effect-interpreters@ is a small abstraction over the ideas of monad
-transformers, the @mtl@, and algebraic effects made popular through free monads
+transformers, the @mtl@, and algebraic effects made popular through Eff monads
 and various implementations of extensible effects. Rather than defining the
-whole program within a free monad and duplicating code on how to interpret
+whole program within a Eff monad and duplicating code on how to interpret
 well defined effects, this library leverages the tools of the monad transformer
 library to deliver something that is familiar, compatible with other libraries
 and as fast as vanilla monad transformers.
@@ -113,7 +148,7 @@ moving operations into a type class, but introduces a more subtle problem along
 the way. Consider the following:
 
 @
-lookupPerson :: PersonName -> 
+lookupPerson :: PersonName ->
 @
 
 . @effect-interpreters@ provides you with a toolkit to
@@ -191,28 +226,3 @@ case, we have to provide a way to lift pure values into the same context as
 'run' - so we simply treat it as success.
 
 -}
-
--- Redefinition of Control.Monad.Trans.Cont because, surprise surprise, it has
--- no inline pragmas.
-
-cont :: ((a -> r) -> r) -> Cont r a
-cont = Cont
-{-# INLINE cont #-}
-
-newtype Cont r a = Cont { runCont :: (a -> r) -> r }
-
-instance Functor (Cont r) where
-  fmap f m = Cont $ \c -> runCont m (c . f)
-  {-# INLINE fmap #-}
-
-instance Applicative (Cont r) where
-  pure x = Cont ($ x)
-  {-# INLINE pure #-}
-  f <*> v = Cont $ \c -> runCont f $ \g -> runCont v (c . g)
-  {-# INLINE (<*>) #-}
-
-instance Monad (Cont r) where
-  return x = Cont ($ x)
-  {-# INLINE return #-}
-  m >>= k = Cont $ \c -> runCont m (\x -> runCont (k x) c)
-  {-# INLINE (>>=) #-}
