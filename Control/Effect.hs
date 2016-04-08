@@ -33,10 +33,13 @@ data Ap f m a
 instance Functor (Ap f m) where
   fmap f (Pure a) = Pure (f a)
   fmap f (xs :<*> x) = fmap (f .) xs :<*> x
+  {-# INLINE fmap #-}
 instance Applicative (Ap f m) where
   pure = Pure
+  {-# INLINE pure #-}
   Pure f <*> y = fmap f y
   (xs :<*> x) <*> y = (fmap flip xs <*> y) :<*> x
+  {-# INLINE (<*>) #-}
 
 -- | The 'Eff' monad transformer is used to write programs that require access to
 -- specific effects. In this library, effects are combined by stacking multiple
@@ -51,14 +54,18 @@ data Eff f m a
 instance Functor (Eff f m) where
   fmap f (Val a) = Val (f a)
   fmap f (Eff apA) = Eff $ fmap (fmap f) apA
+  {-# INLINE fmap #-}
 instance Applicative (Eff f m) where
   pure = Val
+  {-# INLINE pure #-}
   Val f <*> a = fmap f a
   Eff f <*> Eff a = Eff (fmap (<*>) f <*> a)
   Eff f <*> Val a = Eff $ fmap (fmap ($ a)) f
+  {-# INLINE (<*>) #-}
 instance Monad (Eff f m) where
   Val a >>= k = k a
   Eff m >>= f = Eff ((>>= f) <$> m)
+  {-# INLINE (>>=) #-}
 
 -- | The 'IsEff' type family is used to make sure that a given monad stack
 -- is based around 'Eff'. This is important, as it allows us to reason about
@@ -88,12 +95,14 @@ translate step = run step'
 runAp :: Applicative g => (forall x. Sum f m x -> g x) -> Ap f m a -> g a
 runAp _ (Pure x) = pure x
 runAp u (x :<*> f) = flip id <$> u f <*> runAp u x
+{-# INLINE runAp #-}
 
 run :: Monad t
     => (forall x. Sum f m x -> t x)
     -> Eff f m a -> t a
 run _    (Val a)   = return a
 run step (Eff apA) = runAp step apA >>= run step
+{-# INLINE run #-}
 
 -- | 'LiftProgram' defines an @mtl@-style type class for automatically lifting
 -- effects into 'Eff' stacks. When exporting libraries that you intend to
