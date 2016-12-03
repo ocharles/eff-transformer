@@ -6,18 +6,18 @@ license:             BSD3
 license-file:        LICENSE
 author:              Ollie Charles
 maintainer:          ollie@ocharles.org.uk
--- copyright:           
+-- copyright:
 category:            Control
 build-type:          Simple
--- extra-source-files:  
+-- extra-source-files:
 cabal-version:       >=1.10
 
 library
   exposed-modules:     Control.Effect, Control.Effect.Environment, Control.Effect.Nondeterminism, Control.Effect.Exception, Control.Effect.IO, Control.Effect.State, Control.Effect.Identity
-  -- other-modules:       
+  -- other-modules:
   other-extensions:    TypeOperators, DeriveDataTypeable, DefaultSignatures, DeriveFunctor, StandaloneDeriving, ExistentialQuantification, FlexibleContexts, FlexibleInstances, FunctionalDependencies, KindSignatures, RankNTypes, UndecidableInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving
-  build-depends:       base >=4.8 && <5, transformers >=0.4 && <0.6, pipes, free, mmorph
-  -- hs-source-dirs:      
+  build-depends:       base >=4.8 && <5, transformers >=0.4 && <0.6, list-transformer, free, mmorph
+  -- hs-source-dirs:
   default-language:    Haskell2010
   ghc-options: -Wall
 

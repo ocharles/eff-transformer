@@ -5,10 +5,8 @@ module Control.Effect.Nondeterminism where
 
 import Control.Monad (join)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Cont (shiftT)
 import Control.Effect
-import qualified Pipes as P
-import qualified Pipes.Prelude as P
+import List.Transformer (fold, foldM, select)
 
 -- TODO Can probably generalize over any foldable.
 
@@ -27,13 +25,13 @@ choose :: Nondeterministic m => [a] -> m a
 choose = liftNondeterminism
 {-# INLINE choose #-}
 
-runNondeterminism :: Monad m => Eff [] m a -> m [a]
-runNondeterminism eff = P.toListM (P.enumerate (translate makeChoice eff))
-  where makeChoice choices =
-          shiftT (\k ->
-                    lift (P.Select (P.for (P.each choices)
-                                          (P.enumerate . k))))
+runNondeterminism :: Monad m => (b -> a -> b) -> b -> Eff [] m a -> m b
+runNondeterminism f z = fold f z id . translate (lift . select)
 {-# INLINE runNondeterminism #-}
+
+runNondeterminismM :: Monad m => (b -> a -> m b) -> m b -> Eff [] m a -> m b
+runNondeterminismM f z = foldM f z return . translate (lift . select)
+{-# INLINE runNondeterminismM #-}
 
 -- TODO Non-conflicting names?
 
