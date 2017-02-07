@@ -37,6 +37,6 @@ modify' :: (Interprets (State state) m) => (state -> state) -> m ()
 modify' f = interpret (State.modify' f)
 {-# INLINE modify' #-}
 
-gets :: (Interprets (State state) m) => (state -> state) -> m state
+gets :: (Interprets (State state) m) => (state -> a) -> m a
 gets f = interpret (State.gets f)
 {-# INLINE gets #-}
