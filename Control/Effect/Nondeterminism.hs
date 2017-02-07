@@ -9,8 +9,6 @@ import Control.Effect
 import Data.Foldable (Foldable, toList)
 import List.Transformer (fold, foldM, select)
 
--- TODO Can probably generalize over any foldable.
-
 class Monad m => Nondeterministic m where
   liftNondeterminism :: [a] -> m a
 
