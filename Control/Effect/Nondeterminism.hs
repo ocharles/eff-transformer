@@ -6,6 +6,7 @@ module Control.Effect.Nondeterminism where
 import Control.Monad (join)
 import Control.Monad.Trans.Class (lift)
 import Control.Effect
+import Data.Foldable (Foldable, toList)
 import List.Transformer (fold, foldM, select)
 
 -- TODO Can probably generalize over any foldable.
@@ -21,15 +22,15 @@ instance {-# OVERLAPPABLE #-} (Nondeterministic m) => Nondeterministic (Eff f m)
   liftNondeterminism = lift . liftNondeterminism
   {-# INLINE liftNondeterminism #-}
 
-choose :: Nondeterministic m => [a] -> m a
-choose = liftNondeterminism
+choose :: (Nondeterministic m, Foldable f) => f a -> m a
+choose = liftNondeterminism . toList
 {-# INLINE choose #-}
 
-runNondeterminism :: Monad m => (b -> a -> b) -> b -> Eff [] m a -> m b
+runNondeterminism :: (Monad m, Foldable f) => (b -> a -> b) -> b -> Eff f m a -> m b
 runNondeterminism f z = fold f z id . translate (lift . select)
 {-# INLINE runNondeterminism #-}
 
-runNondeterminismM :: Monad m => (b -> a -> m b) -> m b -> Eff [] m a -> m b
+runNondeterminismM :: (Monad m, Foldable f) => (b -> a -> m b) -> m b -> Eff f m a -> m b
 runNondeterminismM f z = foldM f z return . translate (lift . select)
 {-# INLINE runNondeterminismM #-}
 
