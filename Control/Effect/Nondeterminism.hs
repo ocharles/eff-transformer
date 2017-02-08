@@ -35,7 +35,7 @@ runNondeterminismM f z = foldM f z return . translate (lift . select)
 -- TODO Non-conflicting names?
 
 mzero :: Nondeterministic m => m a
-mzero = choose mempty
+mzero = choose []
 
 mplus :: Nondeterministic m => m a -> m a -> m a
 mplus l r = join (choose [l,r])
